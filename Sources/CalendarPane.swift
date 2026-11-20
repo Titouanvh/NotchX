@@ -134,9 +134,11 @@ struct CalendarPane: View {
     @AppStorage(CalendarKeys.weekStart) private var monday = true
     @Environment(\.notchPalette) private var palette
     private let compact: Bool
+    private let narrow: Bool
     private var accent: Color { palette.accent }
-    init(demo: Bool = false, compact: Bool = false) {
+    init(demo: Bool = false, compact: Bool = false, narrow: Bool = false) {
         self.compact = compact
+        self.narrow = narrow
         _store = StateObject(wrappedValue: CourseStore(demo: demo))
         _date = State(initialValue: demo ? Calendar.current.date(from: DateComponents(year: 2026, month: 11, day: 19, hour: 12))! : Date())
     }
@@ -168,17 +170,33 @@ struct CalendarPane: View {
     }
     private var hours: Range<Int> { store.demo ? 8..<19 : 0..<24 }
     private var initialHour: Int {
+        let now = referenceNow
+        let currentHour = calendar.component(.hour, from: now)
+        if days.contains(where: { calendar.isDate($0, inSameDayAs: now) }), hours.contains(currentHour) {
+            return max(hours.lowerBound, currentHour - 1)
+        }
         guard !store.demo else { return 8 }
         let earliest = rangeEvents.filter { !$0.allDay }.map { calendar.component(.hour, from: $0.start) }.min()
         return min(8, earliest ?? 8)
     }
     private func refresh() { store.refresh(from: days.first!, to: calendar.date(byAdding: .day, value: 1, to: days.last!)!) }
     var body: some View {
+        TimelineView(.periodic(from: .now, by: 60)) { context in
+            let now = store.demo ? referenceNow : context.date
+            calendarContent(now: now)
+                .onChange(of: calendar.startOfDay(for: now)) { _, _ in
+                    guard presented, !store.demo else { return }
+                    updatePresentationDay(now)
+                }
+        }
+    }
+    private func calendarContent(now: Date) -> some View {
         VStack(spacing: 0) {
             if store.readable && !showConnectionPreview {
-                header.padding(.horizontal, compact ? 13 : 20).padding(.vertical, compact ? 8 : 11)
+                header.padding(.horizontal, narrow ? 10 : compact ? 13 : 20)
+                    .padding(.vertical, narrow ? 6 : compact ? 8 : 11)
                 Rectangle().fill(.white.opacity(0.08)).frame(height: 1)
-                calendarBody.overlay(alignment: .topTrailing) {
+                calendarBody(now: now).overlay(alignment: .topTrailing) {
                     if rangeEvents.isEmpty {
                         Text(store.calendars.isEmpty ? "Aucun calendrier disponible" : "Aucun événement sur cette période")
                             .font(.system(size: 10)).foregroundStyle(.secondary)
@@ -192,9 +210,7 @@ struct CalendarPane: View {
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
             if store.readable && !showConnectionPreview {
-                TimelineView(.periodic(from: .now, by: 60)) { context in
-                    footer(now: store.demo ? referenceNow : context.date)
-                }
+                footer(now: now)
                 .padding(.horizontal, compact ? 13 : 20).padding(.vertical, compact ? 7 : 9)
             }
         }
@@ -207,63 +223,77 @@ struct CalendarPane: View {
         .onChange(of: monday) { _, _ in refresh() }
         .onChange(of: presented) { _, active in
             guard active, !store.demo else { return }
-            let now = Date()
-            if !calendar.isDate(now, inSameDayAs: lastPresentationDay),
-               calendar.isDate(date, inSameDayAs: lastPresentationDay) {
-                date = now
-            }
-            lastPresentationDay = now
-            refresh()
+            updatePresentationDay(Date())
         }
         .onChange(of: store.authorization) { _, _ in refresh() }
         .onReceive(NotificationCenter.default.publisher(for: .EKEventStoreChanged)) { _ in refresh() }
         .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in refresh() }
     }
+    private func updatePresentationDay(_ now: Date) {
+        // Follow midnight only when the user was viewing the previous today.
+        // Browsing another date must keep the selected period in place.
+        if !calendar.isDate(now, inSameDayAs: lastPresentationDay),
+           calendar.isDate(date, inSameDayAs: lastPresentationDay) {
+            date = now
+        }
+        lastPresentationDay = now
+        refresh()
+    }
     private var header: some View {
-        VStack(alignment: .leading, spacing: 8) {
+        VStack(alignment: .leading, spacing: narrow ? 5 : 8) {
             HStack(alignment: .top) {
                 VStack(alignment: .leading, spacing: 3) {
-                    Text(date.formatted(.dateTime.month(.wide).year().locale(Locale(identifier: "fr_FR"))).capitalized).font(.system(size: compact ? 19 : 23, weight: .medium, design: .rounded))
+                    Text(date.formatted(.dateTime.month(narrow ? .abbreviated : .wide).year()
+                        .locale(Locale(identifier: "fr_FR"))).capitalized)
+                        .font(.system(size: narrow ? 16 : compact ? 19 : 23, weight: .medium, design: .rounded))
+                        .lineLimit(1)
                 }
                 Spacer()
                 HStack(spacing: 2) {
                     viewButton("Jour", value: "day")
                     viewButton("2 jours", value: "twoDays")
-                    viewButton("Semaine", value: "week")
+                    viewButton("Semaine", value: "week", shortLabel: narrow ? "Sem." : nil)
                 }
                 .padding(3)
                 .background(.white.opacity(0.06), in: RoundedRectangle(cornerRadius: 9))
             }
-            HStack(spacing: 10) {
+            HStack(spacing: narrow ? 7 : 10) {
                 Button { move(-1) } label: { Image(systemName: "chevron.left") }.accessibilityLabel("Période précédente")
                 Button("Aujourd’hui") { date = store.demo ? Calendar.current.date(from: DateComponents(year: 2026, month: 11, day: 19, hour: 12))! : Date() }
+                    .lineLimit(1).fixedSize()
                 Button { move(1) } label: { Image(systemName: "chevron.right") }.accessibilityLabel("Période suivante")
-                Text(periodTitle).font(.system(size: 12)).foregroundStyle(.secondary)
+                Text(periodTitle).font(.system(size: narrow ? 11 : 12)).foregroundStyle(.secondary).lineLimit(1)
                 Spacer()
-                Button { showingCalendars.toggle() } label: { Label("Calendriers", systemImage: "line.3.horizontal.decrease") }
+                Button { showingCalendars.toggle() } label: {
+                    if narrow { Image(systemName: "line.3.horizontal.decrease") }
+                    else { Label("Calendriers", systemImage: "line.3.horizontal.decrease") }
+                }
+                    .help("Calendriers")
+                    .accessibilityLabel("Calendriers")
                     .popover(isPresented: $showingCalendars) { CalendarSelection(store: store, hiddenRaw: $hiddenRaw).padding(18).frame(width: 280) }
             }.buttonStyle(.plain).font(.system(size: 12, weight: .medium))
         }
     }
-    private func viewButton(_ label: String, value: String) -> some View {
+    private func viewButton(_ label: String, value: String, shortLabel: String? = nil) -> some View {
         Button {
             mode = value
         } label: {
-            Text(label)
+            Text(shortLabel ?? label)
                 .font(.system(size: 11, weight: .semibold))
                 .foregroundStyle(mode == value ? accent : Color.white.opacity(0.62))
                 .lineLimit(1)
                 .fixedSize(horizontal: true, vertical: false)
-                .padding(.vertical, 5).padding(.horizontal, compact ? 7 : 11)
+                .padding(.vertical, narrow ? 4 : 5).padding(.horizontal, narrow ? 5 : compact ? 7 : 11)
                 .background(mode == value ? accent.opacity(0.19) : Color.clear, in: RoundedRectangle(cornerRadius: 6))
         }
         .buttonStyle(.plain)
+        .accessibilityLabel(label)
         .accessibilityAddTraits(mode == value ? [.isSelected] : [])
     }
     private var periodTitle: String {
         let french = Locale(identifier: "fr_FR")
         if periodLength == 1 {
-            return date.formatted(.dateTime.weekday(.wide).day().month(.abbreviated).locale(french))
+            return date.formatted(.dateTime.weekday(narrow ? .abbreviated : .wide).day().month(.abbreviated).locale(french))
         }
         guard let first = days.first, let last = days.last else { return "" }
         let shortDate = Date.FormatStyle.dateTime.day().month(.abbreviated).locale(french)
@@ -272,18 +302,18 @@ struct CalendarPane: View {
         return "\(start) – \(last.formatted(shortDate))"
     }
     private func move(_ direction: Int) { date = calendar.date(byAdding: .day, value: direction * periodLength, to: date)! }
-    private var calendarBody: some View {
+    private func calendarBody(now: Date) -> some View {
         VStack(spacing: 0) {
             HStack(spacing: 0) {
                 Text(date.formatted(.dateTime.timeZone(.iso8601(.short))))
                     .font(.system(size: 8, design: .monospaced)).foregroundStyle(.secondary).frame(width: 36)
                 ForEach(days, id: \.self) { day in
-                    let isToday = calendar.isDate(day, inSameDayAs: referenceNow)
+                    let isToday = calendar.isDate(day, inSameDayAs: now)
                     Button {
                         date = day
                         if periodLength == 7 { mode = "day" }
                     } label: {
-                        VStack(spacing: 2) {
+                        VStack(spacing: narrow ? 1 : 2) {
                             Text(day.formatted(.dateTime.weekday(.abbreviated).locale(Locale(identifier: "fr_FR"))).capitalized)
                                 .font(.system(size: 10, weight: .medium))
                                 .foregroundStyle(.white.opacity(0.65))
@@ -291,11 +321,11 @@ struct CalendarPane: View {
                                 .font(.system(size: compact ? 15 : 18, weight: .semibold, design: .rounded))
                                 .monospacedDigit()
                                 .foregroundStyle(isToday ? Color.black : Color.white.opacity(0.9))
-                                .frame(width: 28, height: 22)
+                                .frame(width: 28, height: narrow ? 19 : 22)
                                 .background(isToday ? accent : Color.clear, in: Capsule())
                         }
                         .frame(maxWidth: .infinity)
-                        .padding(.vertical, 4)
+                        .padding(.vertical, narrow ? 3 : 4)
                         .contentShape(Rectangle())
                     }
                     .buttonStyle(.plain)
@@ -322,21 +352,26 @@ struct CalendarPane: View {
             }
             if staticPreview {
                 GeometryReader { geometry in
-                    timelineGrid
+                    timelineGrid(now: now)
                         .frame(height: geometry.size.height, alignment: .top)
                         .clipped()
                 }
             } else {
                 ScrollViewReader { proxy in
-                    ScrollView(.vertical) { timelineGrid }
+                    ScrollView(.vertical) { timelineGrid(now: now) }
                         .onAppear { proxy.scrollTo(initialHour, anchor: .top) }
                         .onChange(of: date) { _, _ in proxy.scrollTo(initialHour, anchor: .top) }
                         .onChange(of: mode) { _, _ in proxy.scrollTo(initialHour, anchor: .top) }
+                        .onChange(of: presented) { _, active in
+                            if active, days.contains(where: { calendar.isDate($0, inSameDayAs: referenceNow) }) {
+                                proxy.scrollTo(initialHour, anchor: .top)
+                            }
+                        }
                 }
             }
         }
     }
-    private var timelineGrid: some View {
+    private func timelineGrid(now: Date) -> some View {
         HStack(alignment: .top, spacing: 0) {
             VStack(spacing: 0) {
                 ForEach(hours, id: \.self) { hour in
@@ -348,7 +383,7 @@ struct CalendarPane: View {
             }
             ForEach(days, id: \.self) { day in
                 DayTimeline(day: day, events: events(on: day).filter { !$0.allDay },
-                            calendar: calendar, hours: hours, hourHeight: hourHeight, ink: palette.calendarInk)
+                            calendar: calendar, hours: hours, hourHeight: hourHeight, ink: palette.calendarInk, now: now)
             }
         }
         .padding(.top, 4)
@@ -358,7 +393,7 @@ struct CalendarPane: View {
         return visible.filter { $0.start < end && $0.end > day }
     }
     private var referenceNow: Date {
-        store.demo ? Calendar.current.date(from: DateComponents(year: 2026, month: 11, day: 19, hour: 10, minute: 15))! : Date()
+        store.demo ? Calendar.current.date(from: DateComponents(year: 2026, month: 11, day: 19, hour: 9, minute: 15))! : Date()
     }
     private func nextEvent(now: Date) -> CourseEvent? {
         visible.filter { !$0.allDay && $0.end > now && calendar.isDate($0.start, inSameDayAs: now) }.min { $0.start < $1.start }
@@ -384,6 +419,7 @@ private struct DayTimeline: View {
     let hours: Range<Int>
     let hourHeight: CGFloat
     let ink: Color
+    let now: Date
     @State private var selected: String?
     private struct Placement: Identifiable {
         let event: CourseEvent
@@ -450,8 +486,29 @@ private struct DayTimeline: View {
                         .padding(16).frame(minWidth: 160, maxWidth: 330, alignment: .leading)
                     }
                 }
+                if let offset = currentTimeOffset {
+                    HStack(spacing: 0) {
+                        Circle().frame(width: 6, height: 6)
+                        Rectangle().frame(height: 1)
+                    }
+                    .foregroundStyle(Color.red)
+                    .frame(width: geometry.size.width, height: 6)
+                    .offset(y: offset - 3)
+                    .allowsHitTesting(false)
+                    .accessibilityElement(children: .ignore)
+                    .accessibilityLabel("Heure actuelle, \(now.formatted(date: .omitted, time: .shortened))")
+                }
             }
         }.frame(maxWidth: .infinity).frame(height: CGFloat(hours.count) * hourHeight)
+    }
+    private var currentTimeOffset: CGFloat? {
+        guard calendar.isDate(day, inSameDayAs: now) else { return nil }
+        // Match event placement and hour rules using local wall-clock minutes,
+        // including on daylight-saving transitions, rather than elapsed seconds.
+        let components = calendar.dateComponents([.hour, .minute], from: now)
+        let minutes = (components.hour ?? 0) * 60 + (components.minute ?? 0)
+        guard minutes >= hours.lowerBound * 60, minutes < hours.upperBound * 60 else { return nil }
+        return CGFloat(minutes - hours.lowerBound * 60) / 60 * hourHeight
     }
     private func rangeLabel(_ event: CourseEvent) -> String {
         "\(event.start.formatted(date: .omitted, time: .shortened))–\(event.end.formatted(date: .omitted, time: .shortened))"

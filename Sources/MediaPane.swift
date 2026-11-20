@@ -11,19 +11,24 @@ struct MediaPane: View {
     @Environment(\.notchPalette) private var palette
     private let compact: Bool
     private let short: Bool
+    private let minimal: Bool
     private var accent: Color { palette.accent }
 
-    init(demo: Bool = false, compact: Bool = false, short: Bool = false) {
+    init(demo: Bool = false, compact: Bool = false, short: Bool = false, minimal: Bool = false) {
+        self.minimal = minimal
         self.short = short
         self.compact = compact
         _media = StateObject(wrappedValue: BrowserMediaModel(demo: demo))
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: compact ? 6 : 10) {
+        VStack(alignment: .leading, spacing: minimal ? 4 : compact ? 6 : 10) {
             HStack(spacing: 7) {
                 Image(systemName: "waveform").foregroundStyle(accent)
-                Text("À L’ÉCOUTE").font(.system(size: 10, weight: .semibold)).tracking(2)
+                Text("À L’ÉCOUTE")
+                    .font(.system(size: 10, weight: .semibold))
+                    .tracking(minimal ? 0.8 : 2)
+                    .lineLimit(1)
                 Spacer()
                 Circle().fill(media.track?.playing == true ? accent : Color.white.opacity(0.22))
                     .frame(width: 5, height: 5)
@@ -43,14 +48,19 @@ struct MediaPane: View {
             }
             if let track = media.track {
                 player(track)
+            } else if minimal {
+                ScrollView { idle.frame(maxWidth: .infinity, alignment: .leading) }
+                    .scrollIndicators(.hidden)
             } else {
                 idle
             }
             Spacer(minLength: 0)
             HStack {
-                Text(media.source == .podcasts ? "APPLE PODCASTS" : "YOUTUBE · \(media.source.rawValue.uppercased())")
-                    .font(.system(size: 8, weight: .medium)).tracking(1.2)
-                    .foregroundStyle(.white.opacity(0.28))
+                if !minimal {
+                    Text(media.source == .podcasts ? "APPLE PODCASTS" : "YOUTUBE · \(media.source.rawValue.uppercased())")
+                        .font(.system(size: 8, weight: .medium)).tracking(1.2)
+                        .foregroundStyle(.white.opacity(0.28))
+                }
                 Spacer()
                 Button { showHelp.toggle() } label: {
                     Image(systemName: "questionmark.circle").font(.system(size: 12))
@@ -81,15 +91,18 @@ struct MediaPane: View {
     }
 
     private func player(_ track: BrowserTrack) -> some View {
-        VStack(alignment: .leading, spacing: compact ? 6 : 10) {
+        VStack(alignment: .leading, spacing: minimal ? 4 : compact ? 6 : 10) {
             if !short {
                 artwork
             }
             VStack(alignment: .leading, spacing: 4) {
-                Text(track.title).font(.system(size: compact ? 15 : 16, weight: .medium)).lineLimit(2)
+                Text(track.title).font(.system(size: compact ? 15 : 16, weight: .medium)).lineLimit(minimal ? 1 : 2)
                     .fixedSize(horizontal: false, vertical: true)
-                Text(track.author.isEmpty ? "YouTube" : track.author).font(.system(size: 11))
-                    .foregroundStyle(.white.opacity(0.43)).lineLimit(1)
+                    .help(track.title)
+                if !minimal {
+                    Text(track.author.isEmpty ? "YouTube" : track.author).font(.system(size: 11))
+                        .foregroundStyle(.white.opacity(0.43)).lineLimit(1)
+                }
             }
             progress(track)
             playbackControls(track)
@@ -145,10 +158,12 @@ struct MediaPane: View {
     }
 
     private var idle: some View {
-        VStack(alignment: .leading, spacing: compact ? 6 : 10) {
-            Image(systemName: media.source == .podcasts ? "mic" : "headphones")
-                .font(.system(size: short ? 19 : 31, weight: .ultraLight)).foregroundStyle(accent.opacity(0.65))
-                .frame(height: short ? 20 : compact ? 30 : 60)
+        VStack(alignment: .leading, spacing: minimal ? 4 : compact ? 6 : 10) {
+            if !minimal {
+                Image(systemName: media.source == .podcasts ? "mic" : "headphones")
+                    .font(.system(size: short ? 19 : 31, weight: .ultraLight)).foregroundStyle(accent.opacity(0.65))
+                    .frame(height: short ? 20 : compact ? 30 : 60)
+            }
             Text(media.source == .podcasts ? "Apple Podcasts" : "Aucune lecture")
                 .font(.system(size: compact ? 17 : 21, weight: .medium)).fixedSize(horizontal: false, vertical: true)
             Text(media.source == .podcasts

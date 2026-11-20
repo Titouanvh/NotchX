@@ -10,8 +10,15 @@ private enum Preference {
     static let size = "notch.panelSize"
 
     static func register() {
+        // “compact” was the 590 × 270 size before four sizes were introduced.
+        // Give the new minimum a distinct stored value to preserve that choice.
+        let rendering = CommandLine.arguments.contains("--preview")
+            || CommandLine.arguments.contains("--export-preview")
+        if !rendering && UserDefaults.standard.string(forKey: size) == "compact" {
+            UserDefaults.standard.set(PanelSize.medium.rawValue, forKey: size)
+        }
         UserDefaults.standard.register(defaults: [
-            hover: true, keepOpen: false, screen: "builtIn", size: "compact"
+            hover: true, keepOpen: false, screen: "builtIn", size: PanelSize.medium.rawValue
         ])
     }
 }
@@ -26,17 +33,45 @@ private enum NotchGeometry {
     static let shoulder: CGFloat = 13
 }
 
-private enum PanelSize: String {
-    case compact, large
+private enum PanelSize: String, CaseIterable {
+    case compact = "minimal", small, medium, large
 
     static var selected: Self {
-        Self(rawValue: UserDefaults.standard.string(forKey: Preference.size) ?? "") ?? .compact
+        // Rendering options are process-local and never overwrite preferences.
+        if let index = CommandLine.arguments.firstIndex(of: "--preview-size"),
+           CommandLine.arguments.indices.contains(index + 1),
+           let size = previewValue(CommandLine.arguments[index + 1]) {
+            return size
+        }
+        let stored = UserDefaults.standard.string(forKey: Preference.size) ?? ""
+        return stored == "compact" ? .medium : Self(rawValue: stored) ?? .medium
+    }
+
+    static func previewValue(_ value: String) -> Self? {
+        switch value.lowercased() {
+        case "compact", "minimal": .compact
+        case "small", "petit": .small
+        case "medium", "moyen": .medium
+        case "large", "grand": .large
+        default: nil
+        }
     }
 
     var dimensions: CGSize {
         switch self {
-        case .compact: CGSize(width: 590, height: 270)
+        case .compact: CGSize(width: 480, height: 230)
+        case .small: CGSize(width: 540, height: 250)
+        case .medium: CGSize(width: 590, height: 270)
         case .large: CGSize(width: 650, height: 310)
+        }
+    }
+
+    var label: String {
+        switch self {
+        case .compact: "Compact · 480 × 230 pt"
+        case .small: "Petit · 540 × 250 pt"
+        case .medium: "Moyen · 590 × 270 pt"
+        case .large: "Grand · 650 × 310 pt"
         }
     }
 }
@@ -45,6 +80,12 @@ private enum PanelSize: String {
 struct NotchX {
     @MainActor
     static func main() {
+        if let index = CommandLine.arguments.firstIndex(of: "--preview-size"),
+           !CommandLine.arguments.indices.contains(index + 1)
+            || PanelSize.previewValue(CommandLine.arguments[index + 1]) == nil {
+            fputs("Taille inconnue. --preview-size compact|small|medium|large\n", stderr)
+            exit(2)
+        }
         Preference.register()
         let app = NSApplication.shared
         if let index = CommandLine.arguments.firstIndex(of: "--export-preview"),
@@ -615,26 +656,30 @@ private struct Board: View {
             let shoulder = attached ? NotchGeometry.shoulder : 0
             let bodyHeight = geometry.size.height - topInset
             let compact = bodyHeight < 320
-            let mediaWidth = min(214, max(166, (geometry.size.width - shoulder * 2) * 0.235))
             let outline = PanelSilhouette(attached: attached)
             let cameraGap = cameraWidth + 18
             let width = geometry.size.width - shoulder * 2
-            let integrated = topInset >= 26 && (width - cameraGap - 24) / 2 >= 174
+            let narrowCalendar = width <= PanelSize.small.dimensions.width
+            let mediaMinimum: CGFloat = width <= PanelSize.compact.dimensions.width ? 132 : narrowCalendar ? 150 : 166
+            let mediaWidth = min(214, max(mediaMinimum, width * 0.235))
+            let wingWidth = (width - cameraGap - 24) / 2
+            let integrated = topInset >= 26 && wingWidth >= 104
+            let narrowHeader = wingWidth < 174
             VStack(spacing: 0) {
                 if integrated {
-                    integratedHeader(cameraGap: cameraGap)
+                    integratedHeader(cameraGap: cameraGap, narrow: narrowHeader)
                         .frame(height: topInset)
                         .padding(.bottom, 3)
                 } else {
-                    header
+                    header(narrow: width < 540)
                 }
                 ZStack {
                     HStack(alignment: .top, spacing: 12) {
-                        MediaPane(demo: demo, compact: compact, short: bodyHeight < 295)
+                        MediaPane(demo: demo, compact: compact, short: bodyHeight < 295, minimal: bodyHeight < 245)
                             .frame(width: mediaWidth)
                             .frame(maxHeight: .infinity, alignment: .top)
                             .background(palette.panel, in: RoundedRectangle(cornerRadius: 19))
-                        CalendarPane(demo: demo, compact: compact)
+                        CalendarPane(demo: demo, compact: compact, narrow: narrowCalendar)
                             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
                             .padding(.top, integrated ? 5 : 0)
                     }
@@ -684,10 +729,10 @@ private struct Board: View {
         }
     }
 
-    private func integratedHeader(cameraGap: CGFloat) -> some View {
+    private func integratedHeader(cameraGap: CGFloat, narrow: Bool) -> some View {
         HStack(spacing: 0) {
             HStack(spacing: 0) {
-                sectionPicker
+                sectionPicker(iconsOnly: narrow)
                 Spacer(minLength: 0)
             }
             .frame(maxWidth: .infinity)
@@ -695,7 +740,8 @@ private struct Board: View {
             Color.clear.frame(width: cameraGap).accessibilityHidden(true)
 
             HStack(spacing: 6) {
-                title.frame(maxWidth: .infinity, alignment: .center)
+                if !narrow { title.frame(maxWidth: .infinity, alignment: .center) }
+                else { Spacer(minLength: 0) }
                 headerActions
             }
             .frame(maxWidth: .infinity)
@@ -703,13 +749,13 @@ private struct Board: View {
         .padding(.horizontal, 12)
     }
 
-    private var header: some View {
+    private func header(narrow: Bool) -> some View {
         HStack(spacing: 8) {
             title
             Spacer()
-            sectionPicker
-            Spacer()
-            if demo {
+            sectionPicker(iconsOnly: narrow)
+            Spacer(minLength: 0)
+            if demo && !narrow {
                 Text("Données de démonstration")
                     .font(.system(size: 11, weight: .medium))
                     .foregroundStyle(.secondary)
@@ -721,13 +767,16 @@ private struct Board: View {
         .frame(height: 34)
     }
 
-    private var sectionPicker: some View {
+    private func sectionPicker(iconsOnly: Bool = false) -> some View {
         HStack(spacing: 2) {
             ForEach(BoardSection.allCases) { item in
                 Button {
                     section = item
                 } label: {
-                    Label(item.rawValue, systemImage: item.icon)
+                    Group {
+                        if iconsOnly { Image(systemName: item.icon) }
+                        else { Label(item.rawValue, systemImage: item.icon) }
+                    }
                         .font(.system(size: 11, weight: .medium))
                         .fixedSize()
                         .foregroundStyle(section == item ? accent : Color.secondary)
@@ -738,6 +787,8 @@ private struct Board: View {
                         .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
+                .help(item.rawValue)
+                .accessibilityLabel(item.rawValue)
                 .accessibilityAddTraits(section == item ? [.isSelected] : [])
             }
         }
@@ -764,7 +815,7 @@ private struct NotchSettings: View {
     @AppStorage(Preference.hover) private var hover = true
     @AppStorage(Preference.keepOpen) private var keepOpen = false
     @AppStorage(Preference.screen) private var screen = "builtIn"
-    @AppStorage(Preference.size) private var size = PanelSize.compact.rawValue
+    @AppStorage(Preference.size) private var size = PanelSize.medium.rawValue
     @State private var loginStatus: SMAppService.Status = .notRegistered
     @State private var loginError: String?
     let quit: () -> Void
@@ -781,8 +832,9 @@ private struct NotchSettings: View {
                             Text("Écran sous le pointeur").tag("pointer")
                         }
                         Picker("Taille", selection: $size) {
-                            Text("Compact").tag(PanelSize.compact.rawValue)
-                            Text("Grand").tag(PanelSize.large.rawValue)
+                            ForEach(PanelSize.allCases, id: \.rawValue) { option in
+                                Text(option.label).tag(option.rawValue)
+                            }
                         }
                     }
                     Section("Démarrage") {
