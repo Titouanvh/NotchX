@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "https://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>CFBundleDisplayName</key><string>NotchX</string>
+    <key>CFBundleName</key><string>NotchX</string>
+    <key>CFBundleExecutable</key><string>NotchX</string>
+    <key>CFBundleIdentifier</key><string>local.titouan.notchx</string>
+    <key>CFBundleIconFile</key><string>AppIcon</string>
+    <key>CFBundlePackageType</key><string>APPL</string>
+    <key>CFBundleShortVersionString</key><string>1.2</string>
+    <key>CFBundleVersion</key><string>3</string>
+    <key>CFBundleDevelopmentRegion</key><string>fr</string>
+    <key>LSMinimumSystemVersion</key><string>14.0</string>
+    <key>LSApplicationCategoryType</key><string>public.app-category.productivity</string>
+    <key>LSUIElement</key><true/>
+    <key>NSCalendarsFullAccessUsageDescription</key>
+    <string>NotchX lit les événements de vos calendriers sélectionnés pour afficher votre emploi du temps.</string>
+    <key>NSCalendarsUsageDescription</key>
+    <string>NotchX lit les événements de vos calendriers sélectionnés pour afficher votre emploi du temps.</string>
+    <key>NSAppleEventsUsageDescription</key>
+    <string>NotchX utilise les événements Apple pour afficher et contrôler la lecture YouTube dans le navigateur que vous connectez.</string>
+</dict>
+</plist>
