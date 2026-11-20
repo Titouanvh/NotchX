@@ -2,7 +2,7 @@
 
 Tableau de bord natif pour macOS, sous l’encoche : calendrier, commandes média et dépôt de fichiers. Gratuit et open source, sous licence MIT.
 
-[Vidéo de lancement · 15 s](https://github.com/Titouanvh/NotchX/releases/latest/download/NotchX-launch.mp4)
+[Site officiel](https://notchx.vercel.app/) · [Vidéo de lancement · 15 s](https://github.com/Titouanvh/NotchX/releases/latest/download/NotchX-launch.mp4)
 
 ## Télécharger et installer
 
